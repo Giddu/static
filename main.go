@@ -3,14 +3,9 @@ package main
 import (
 	"flag"
 	"fmt"
-	"io/fs"
 	"log"
 	"net/http"
-	"os"
-	"path/filepath"
-	"strings"
 	"sync"
-	"text/template"
 
 	"github.com/fsnotify/fsnotify"
 )
@@ -36,8 +31,10 @@ func main() {
 
 	go watchPath(servingPath)
 
-	http.HandleFunc("/", fsHandler)
 	http.HandleFunc("/reload", reloadHandler)
+
+	fs := http.FileServer(http.Dir(servingPath))
+	http.Handle("/", fs)
 
 	log.Printf("Server Started on localhost:%d\n", port)
 	err := http.ListenAndServe(fmt.Sprintf(":%d", port), nil)
@@ -79,41 +76,6 @@ func watchPath(servingPath string) {
 		log.Fatal(err)
 	}
 
-}
-
-func fsHandler(w http.ResponseWriter, r *http.Request) {
-	requestPath := r.URL.Path[1:]
-	if requestPath == "" {
-		requestPath = "."
-	}
-
-	stat, err := fs.Stat(os.DirFS(servingPath), requestPath)
-	if err != nil {
-		fmt.Println(err)
-	}
-
-	filePath := filepath.Join(servingPath, requestPath)
-	if stat.IsDir() {
-		filePath = filepath.Join(servingPath, "index.html")
-	}
-
-	fmt.Println("filePath", filePath)
-	content, err := os.ReadFile(filePath)
-	if err != nil {
-		http.Error(w, "File not found", http.StatusNotFound)
-		return
-	}
-
-	if strings.HasSuffix(filePath, ".html") {
-		reloadScript := `<script>
-            const es = new EventSource('/reload');
-            es.onmessage = () => window.location.reload();
-        </script>`
-		tmpl := template.Must(template.New("html").Parse(string(content) + reloadScript))
-		tmpl.Execute(w, nil)
-	} else {
-		w.Write(content)
-	}
 }
 
 func reloadHandler(w http.ResponseWriter, r *http.Request) {
